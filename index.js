@@ -11,6 +11,8 @@ const redirect_uri = process.env.REDIRECT_URI;
 
 // ⚠️ MVP: token i minnet (räcker för nu)
 let access_token = null;
+let user_id = null;
+
 
 /* =====================
    ROOT
@@ -82,6 +84,8 @@ app.get('/callback', async (req, res) => {
         }
       }
     );
+    user_id = userResponse.data.id; // Spara user_id om det behövs senare
+
 
     res.json({
       user: userResponse.data,
@@ -119,6 +123,71 @@ app.get('/top-tracks', async (req, res) => {
     res.status(400).json(err.response?.data || err.message);
   }
 });
+app.get('/create-playlist', async (req, res) => {
+  if (!access_token || !user_id) {
+    return res.status(401).json({ error: 'Login first' });
+  }
+
+  try {
+    // 1. Get top tracks
+    const topTracksResponse = await axios.get(
+      'https://api.spotify.com/v1/me/top/tracks',
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        },
+        params: {
+          limit: 20,
+          time_range: 'medium_term'
+        }
+      }
+    );
+
+    const trackUris = topTracksResponse.data.items.map(
+      track => track.uri
+    );
+
+    // 2. Create playlist
+    const playlistResponse = await axios.post(
+      `https://api.spotify.com/v1/users/${user_id}/playlists`,
+      {
+        name: 'Auralytics – My Top Tracks',
+        description: 'Auto-generated playlist based on your listening history',
+        public: false
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const playlistId = playlistResponse.data.id;
+
+    // 3. Add tracks
+    await axios.post(
+      `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+      {
+        uris: trackUris
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      playlistUrl: playlistResponse.data.external_urls.spotify
+    });
+  } catch (err) {
+    res.status(400).json(err.response?.data || err.message);
+  }
+});
+
 
 /* =====================
    START SERVER
